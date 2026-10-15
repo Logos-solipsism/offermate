@@ -169,14 +169,11 @@ sequenceDiagram
 ### 1. 启动中间件
 
 ```bash
-docker compose up -d          # MySQL 13306 / Redis 6379 / RocketMQ 9876 / MinIO 9000
-```
-
-MinIO 在 `minio` profile 下，需要一起启动时用：
-
-```bash
+# 一次把 MySQL(13306) / Redis(6379) / RocketMQ(9876) / MinIO(9000) 都拉起来
 docker compose --profile minio up -d
 ```
+
+> MinIO 定义在 `minio` profile 里（它的镜像比较大）。不加 `--profile minio` 服务也能启动，但简历上传会因为桶不存在而失败——启动时只在日志里打一条告警，不会中断启动。
 
 ### 2. 初始化数据库
 
@@ -190,7 +187,7 @@ mysql -h127.0.0.1 -P13306 -uroot -proot123456 < server/src/main/resources/db/dat
 不配置也能跑：AI 助手接口会降级返回提示语，其余功能不受影响。要真实体验就填一个 OpenAI 兼容服务的 Key（硅基流动 / DeepSeek / 通义 / 本地 Ollama 都可以）：
 
 ```bash
-export AI_API_KEY=sk-你的key
+export AI_API_KEY=sk-你的key                     # Windows PowerShell: $env:AI_API_KEY="sk-你的key"
 export AI_MODEL=Qwen/Qwen2.5-7B-Instruct
 ```
 
@@ -212,7 +209,7 @@ cd web && npm install && npm run dev
 
 打开 <http://localhost:5273>。
 
-### 演示账号（执行了 data.sql 之后可用；手机号刻意避开常见测试号段）
+### 演示账号（执行了 data.sql 之后可用）
 
 | 角色 | 手机号 | 密码 | 能做什么 |
 | --- | --- | --- | --- |
