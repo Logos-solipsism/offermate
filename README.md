@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/RocketMQ-5-D77310?style=flat-square" alt="RocketMQ 5">
     <img src="https://img.shields.io/badge/MinIO-S3%20Compatible-C72E49?style=flat-square" alt="MinIO">
     <img src="https://img.shields.io/badge/LangChain4j-Function%20Calling-20232A?style=flat-square" alt="LangChain4j">
-    <a href="https://github.com/Logos-solipsism/OfferMate/actions/workflows/ci.yml"><img src="https://github.com/Logos-solipsism/OfferMate/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/Logos-solipsism/offermate/actions/workflows/ci.yml"><img src="https://github.com/Logos-solipsism/offermate/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License"></a>
   </p>
 </div>
@@ -91,7 +91,7 @@
 
 > 限流和重试都是保护手段，不能自己变成新的故障点。
 
-- **Redis + Lua 令牌桶** — 注解 + AOP 切面按「用户 / IP / 接口」三个维度限流；Lua 保证"补充令牌 → 判断 → 扣减 → 回写"原子执行，避免并发下双双放行；**Redis 不可用时降级为本机令牌桶**。
+- **Redis + Lua 令牌桶** — 注解 + AOP 切面按「用户 / IP / 接口」三个维度限流，**阈值优先取配置表（运营改完 30 秒内生效，注解上的值只是兜底默认值）**；Lua 保证"补充令牌 → 判断 → 扣减 → 回写"原子执行，避免并发下双双放行；**Redis 不可用时降级为本机令牌桶**。
 - **指数退避 + 抖动** — 失败不立刻重试（对方可能正在故障），间隔按 0.2s → 0.4s → 0.8s 递增并加随机抖动防重试风暴；长任务重试走 MQ 延时消息，**不占用业务线程**。
 - **Redisson + WatchDog** — 合并与投递两处临界区加锁；看门狗自动续期，避免业务超时导致"锁提前释放 → 并发重复执行"；投递锁**在事务提交后才释放**。
 
@@ -214,7 +214,7 @@ cd web && npm install && npm run dev
 cd server && mvn test
 ```
 
-15 个用例，覆盖 JWT 签发与篡改/过期校验、指数退避的次数上限与封顶、解析故障注入能力、以及 HR 越权查询拦截；**不依赖 MySQL / Redis / RocketMQ**，所以 CI 里可以直接跑。
+19 个用例，覆盖 JWT 签发与篡改/过期校验、指数退避的次数上限与封顶、限流阈值的配置表优先与兜底、解析故障注入能力、以及 HR 越权查询拦截；**不依赖 MySQL / Redis / RocketMQ**，所以 CI 里可以直接跑。
 
 ### 7. 或者：一条命令把中间件和后端都放进容器
 
@@ -279,13 +279,14 @@ docker compose --profile app --profile minio up -d --build
 
 写在这里是因为这些都是我在实现过程中就知道、并且明确没有做的事：
 
-- **简历解析用的是可注入故障的 Mock 实现**：压测要打几千次，真实调用大模型既烧钱、耗时又波动，无法作为稳定对照组。解析能力已抽成接口（`ResumeParserClient`），真实环境替换实现即可，业务代码不用改。AI 助手（Function Calling + Redis 记忆）这条链路是真实的调用代码。
+- **解析能力抽成了接口（`ResumeParserClient`），压测与演示用的是可注入故障的实现**：压测要打几千次，真实调用大模型既烧钱、耗时又波动，无法作为稳定对照组——"故障注入 30%"那组数据就是靠它复现的。接入真实解析服务只需替换实现，业务代码不用改。AI 助手（Function Calling + Redis 记忆）这条链路是真实的调用代码。
 - **匹配分是规则算法**（职位要求技能与简历结构化字段的重合度），不是模型打分。
-- **没有本地消息表**：靠 MQ 自身可靠性 + 消费端幂等表保证一致性，极端情况下（发消息前进程崩溃）理论上会丢一条，只能人工重放。
+- **发消息是在事务里发的，没有本地消息表**：靠 MQ 自身可靠性 + 消费端幂等表保证一致性，极端情况下（发消息前进程崩溃）理论上会丢一条，只能人工重放；正确做法是先提交再发消息，或用本地消息表，这是下一版第一件要补的事。
 - **没有接入监控与告警**：目前用 traceId 串日志排查，没有接 Prometheus / SkyWalking。
 - **MinIO 与 Redis 都是单节点**：没有副本、没有高可用，生产环境需要换成集群方案。
 - **跨用户秒传没有引用计数**：两个用户共用同一个存储对象，一方删除会影响到另一方。
-- **分片上传只做了服务端校验（大小、序号、归属）**，没有做分片内容哈希校验。
+- **简历解析跑在业务服务里**：量大了应该拆成独立服务，避免慢调用拖累主服务。
+- **压测环境是本机 Docker**：数字只能说明趋势，不代表线上表现。
 
 ## 文档
 

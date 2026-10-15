@@ -15,6 +15,7 @@ import java.lang.reflect.Method;
 /**
  * 限流切面：把 @RateLimit 注解翻译成令牌桶的 key 与参数。
  * key 组合规则：rate:{业务键}:{维度}:{身份}，例如 rate:apply:USER:10086
+ * 阈值来源：rate_limit_config 表（运营可改、30 秒内生效）> 注解上的默认值
  */
 @Slf4j
 @Aspect
@@ -23,6 +24,9 @@ import java.lang.reflect.Method;
 public class RateLimiterAspect {
 
     private final RedisTokenBucketLimiter limiter;
+
+    /** 阈值优先取配置表（可热调），取不到才用注解上的默认值 */
+    private final RateLimitConfigProvider configProvider;
 
     @Around("@annotation(com.offermate.common.limiter.RateLimit)")
     public Object around(ProceedingJoinPoint point) throws Throwable {
@@ -39,7 +43,9 @@ public class RateLimiterAspect {
         };
 
         String bucketKey = "rate:" + annotation.key() + ":" + annotation.dimension() + ":" + identity;
-        boolean allowed = limiter.tryAcquire(bucketKey, annotation.capacity(), annotation.rate(), annotation.tokens());
+        RateLimitConfigProvider.Setting setting = configProvider.resolve(
+                annotation.key(), annotation.dimension().name(), annotation.capacity(), annotation.rate());
+        boolean allowed = limiter.tryAcquire(bucketKey, setting.capacity(), setting.rate(), annotation.tokens());
         if (!allowed) {
             log.warn("触发限流, key={}, method={}", bucketKey, method.getName());
             throw BizException.tooManyRequests(annotation.message());
