@@ -22,7 +22,12 @@ public class AiConfig {
     @Value("${ai.base-url}")
     private String baseUrl;
 
-    @Value("${ai.api-key}")
+    /**
+     * 大模型 Key：**允许为空**。
+     * LangChain4j 在 Key 为 null / 空串时会直接抛异常，导致整个应用起不来，
+     * 所以这里兜一个非空占位符：不配 Key 时服务照常启动，只有 AI 接口在调用时失败并降级返回提示语。
+     */
+    @Value("${ai.api-key:}")
     private String apiKey;
 
     @Value("${ai.model}")
@@ -41,7 +46,7 @@ public class AiConfig {
     public OpenAiChatModel chatLanguageModel() {
         return OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
-                .apiKey(apiKey)
+                .apiKey(apiKey == null || apiKey.isBlank() ? "not-configured" : apiKey)
                 .modelName(modelName)
                 .temperature(temperature)
                 .timeout(Duration.ofSeconds(timeoutSeconds))
