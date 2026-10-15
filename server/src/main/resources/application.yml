@@ -1,0 +1,103 @@
+server:
+  port: ${SERVER_PORT:18080}
+
+# 日志格式里带上 traceId：一次请求跨 HTTP / MQ / 数据库的日志就能用同一个 ID 串起来
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-no-trace}] %logger{28} - %msg%n"
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 20
+
+spring:
+  application:
+    name: offermate-server
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:13306}/offermate?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root123456}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 3000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:redis123456}
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
+  servlet:
+    multipart:
+      # 单文件 200MB：分片上传走 5MB 切片，这里主要是兜底
+      max-file-size: 200MB
+      max-request-size: 200MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+rocketmq:
+  name-server: ${ROCKETMQ_NAMESERVER:localhost:9876}
+  producer:
+    group: offermate-producer
+    send-message-timeout: 3000
+    retry-times-when-send-failed: 3
+
+redisson:
+  address: redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}
+  password: ${REDIS_PASSWORD:redis123456}
+  database: 1
+  # 看门狗续期超时：业务执行超过锁租期时自动续期，避免"锁提前释放 → 并发重复执行"
+  lock-watchdog-timeout: 30000
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: ${MINIO_BUCKET:offermate-resume}
+  chunk-size: 5242880
+
+# 大模型接入：任何 OpenAI 兼容服务都行（硅基流动 / DeepSeek / 通义 / 本地 Ollama），
+# 只改 base-url、api-key、model 三项；不配 api-key 时 AI 助手接口会降级返回提示语，不影响其他功能。
+ai:
+  base-url: ${AI_BASE_URL:https://api.siliconflow.cn/v1}
+  api-key: ${AI_API_KEY:sk-替换成你自己的key}
+  model: ${AI_MODEL:Qwen/Qwen2.5-7B-Instruct}
+  temperature: 0.3
+  timeout-seconds: 30
+  memory-ttl-days: 7
+  memory-window: 20
+
+offermate:
+  retry:
+    max-attempts: 4
+    base-backoff-millis: 200
+    max-backoff-millis: 5000
+  rate-limit:
+    # Redis 不可用时的本地降级：单机每秒放行数
+    local-fallback-qps: 50
+  upload:
+    # 分片状态保留时长（断点续传窗口）
+    part-state-ttl-hours: 24
+  jwt:
+    secret: ${JWT_SECRET:offermate-dev-secret-key-please-change-in-production-32bytes}
+    expire-hours: 24
+  # 故障注入开关：把 parser-fail-rate 调成 0.3 就能复现"重试前后成功率对比"的数据
+  mock:
+    parser-fail-rate: ${MOCK_PARSER_FAIL_RATE:0.0}
+    parser-latency-millis: ${MOCK_PARSER_LATENCY_MILLIS:800}
+    sms-fail-rate: ${MOCK_SMS_FAIL_RATE:0.0}
