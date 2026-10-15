@@ -10,6 +10,7 @@
     <img src="https://img.shields.io/badge/RocketMQ-5-D77310?style=flat-square" alt="RocketMQ 5">
     <img src="https://img.shields.io/badge/MinIO-S3%20Compatible-C72E49?style=flat-square" alt="MinIO">
     <img src="https://img.shields.io/badge/LangChain4j-Function%20Calling-20232A?style=flat-square" alt="LangChain4j">
+    <a href="https://github.com/Logos-solipsism/OfferMate/actions/workflows/ci.yml"><img src="https://github.com/Logos-solipsism/OfferMate/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License"></a>
   </p>
 </div>
@@ -207,6 +208,22 @@ cd web && npm install && npm run dev
 
 前端开发端口是 **5273**（`vite.config.js` 里可改），并通过 Vite 代理把 `/api` 转发到 `http://localhost:18080`，所以前端代码里不需要写死后端地址。
 
+### 6. 运行单元测试
+
+```bash
+cd server && mvn test
+```
+
+15 个用例，覆盖 JWT 签发与篡改/过期校验、指数退避的次数上限与封顶、解析故障注入能力、以及 HR 越权查询拦截；**不依赖 MySQL / Redis / RocketMQ**，所以 CI 里可以直接跑。
+
+### 7. 或者：一条命令把中间件和后端都放进容器
+
+```bash
+docker compose --profile app --profile minio up -d --build
+```
+
+后端配置全部走环境变量（`application.yml` 里每一项都有本地默认值），容器之间用服务名互联，所以同一个 jar 既能本机跑也能进容器跑。前端仍在宿主机上用 Vite 开发服务器启动。
+
 打开 <http://localhost:5273>。
 
 ### 演示账号（执行了 data.sql 之后可用）
@@ -232,7 +249,8 @@ cd web && npm install && npm run dev
 ## 目录结构
 
     offermate/
-    ├─ docker-compose.yml            # 一键起 MySQL / Redis / RocketMQ / MinIO
+    ├─ docker-compose.yml            # 一键起 MySQL / Redis / RocketMQ / MinIO（app profile 还能起后端）
+    ├─ .github/workflows/ci.yml      # CI：JDK 17 下编译并运行单元测试
     ├─ deploy/broker.conf            # RocketMQ broker 配置（Docker 场景需指定 brokerIP1）
     ├─ docs/
     │  ├─ 01-项目方案-OfferMate.md    # 架构、领域模型、亮点实现、DDL、接口、设计决策记录
@@ -241,6 +259,8 @@ cd web && npm install && npm run dev
     │  ├─ Bench.java                 # 纯 JDK 压测客户端（无第三方依赖，含故障注入实验接口）
     │  └─ 压测说明.md                 # 压测环境、方法、结果与复现步骤
     ├─ server/                       # Spring Boot 后端
+    │  ├─ Dockerfile                # 多阶段构建：Maven 编译 + JRE 运行
+    │  ├─ src/test/                 # 单元测试（不依赖中间件）
     │  └─ src/main/
     │     ├─ java/com/offermate/
     │     │  ├─ common/              # 鉴权、上下文、限流、重试、traceId、统一响应

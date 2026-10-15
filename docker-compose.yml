@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     container_name: offermate-mysql
     ports:
-      # 宿主机用 13306，避开本机已安装的 MySQL（它占着 3306）
+      # 宿主机映射到 13306（容器内仍是 3306），避免与本机可能已存在的 MySQL 冲突
       - "13306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: root123456
@@ -14,7 +14,9 @@ services:
     volumes:
       # 用 Docker 数据卷（不用挂载本机目录）：Windows 上挂载目录要穿过虚拟机，磁盘 IO 最慢
       - mysql-data:/var/lib/mysql
-      - ./server/src/main/resources/db:/docker-entrypoint-initdb.d
+      # 逐个挂载并加数字前缀：容器按文件名字母序执行，直接挂目录会让 data.sql 跑在 schema.sql 前面
+      - ./server/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./server/src/main/resources/db/data.sql:/docker-entrypoint-initdb.d/02-data.sql
 
   redis:
     image: redis:7.2
@@ -78,6 +80,36 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - minio-data:/bitnami/minio/data
+
+  # 应用本体：默认不启动。一条命令跑全栈（中间件 + 后端）：
+  #   docker compose --profile app --profile minio up -d --build
+  # 配置全部走环境变量（application.yml 里每一项都有本地默认值），容器之间用服务名互联
+  app:
+    profiles: ["app"]
+    build:
+      context: ./server
+    container_name: offermate-app
+    restart: unless-stopped
+    depends_on:
+      - mysql
+      - redis
+      - rocketmq-namesrv
+      - rocketmq-broker
+    ports:
+      - "18080:18080"
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_PASSWORD: root123456
+      REDIS_HOST: redis
+      REDIS_PASSWORD: redis123456
+      ROCKETMQ_NAMESERVER: rocketmq-namesrv:9876
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      # 大模型 Key 从宿主机环境变量透传，没配也能启动（AI 接口降级返回提示语）
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-Qwen/Qwen2.5-7B-Instruct}
 
 # 数据都放在 Docker 数据卷里（比挂载 Windows 目录快很多），删掉数据卷就等于清空重来
 volumes:
