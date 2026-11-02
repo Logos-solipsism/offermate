@@ -40,7 +40,7 @@ public class AuthController {
         user.setPhone(request.phone());
         user.setPassword(passwordEncoder.encode(request.password()));
         user.setNickname(request.nickname());
-        user.setRole(request.role() == null ? SysUser.ROLE_SEEKER : request.role());
+        user.setRole(SysUser.ROLE_SEEKER); // 注册一律为求职者：HR/管理员账号由 db/data.sql 预置，不能由客户端声明
         user.setStatus(1);
         user.setCreateTime(LocalDateTime.now());
         user.setUpdateTime(LocalDateTime.now());
@@ -67,7 +67,7 @@ public class AuthController {
     }
 
     public record RegisterRequest(@NotBlank String phone, @NotBlank String password,
-                                  String nickname, String role) {
+                                  String nickname) {
     }
 
     public record LoginRequest(@NotBlank String phone, @NotBlank String password) {
