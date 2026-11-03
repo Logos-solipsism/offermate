@@ -5,6 +5,7 @@ import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -18,15 +19,26 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>会话校验比对的是 Redis 里存的 token 本身，而不只是 key 在不在：同一账号重新登录换发令牌后，
  * 旧令牌如果还能用，"改密码/封号即失效"就退化成了"把 key 删掉才失效"。
+ *
+ * <p>客户端 IP 默认只取 TCP 对端地址：X-Forwarded-For 是客户端可随手编的请求头，
+ * 只有直连方确实是可信代理（配了 offermate.auth.trusted-proxies）时才采信它。
  */
 @Component
 @RequiredArgsConstructor
 public class AuthInterceptor implements HandlerInterceptor {
 
     private static final String SESSION_KEY_PREFIX = "session:token:";
+    private static final String FORWARDED_FOR = "X-Forwarded-For";
 
     private final JwtUtil jwtUtil;
     private final StringRedisTemplate redis;
+
+    /**
+     * 可信代理地址，逗号分隔；留空（默认）= 不信任任何转发头。
+     * 只有请求的直连对端在这个列表里时，才读取它写的 X-Forwarded-For 第一段。
+     */
+    @Value("${offermate.auth.trusted-proxies:}")
+    private String trustedProxies;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
@@ -73,11 +85,28 @@ public class AuthInterceptor implements HandlerInterceptor {
         return null;
     }
 
-    private String clientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isBlank()) {
-            ip = request.getRemoteAddr();
+    /** 默认取 TCP 对端地址；仅当对端是显式配置的可信代理时，才采信 X-Forwarded-For 的第一段 */
+    String clientIp(HttpServletRequest request) {
+        String remoteAddr = request.getRemoteAddr();
+        if (!isTrustedProxy(remoteAddr)) {
+            return remoteAddr;
         }
-        return ip.split(",")[0].trim();
+        String forwarded = request.getHeader(FORWARDED_FOR);
+        if (forwarded == null || forwarded.isBlank()) {
+            return remoteAddr;
+        }
+        return forwarded.split(",")[0].trim();
+    }
+
+    private boolean isTrustedProxy(String remoteAddr) {
+        if (trustedProxies == null || trustedProxies.isBlank() || remoteAddr == null) {
+            return false;
+        }
+        for (String proxy : trustedProxies.split(",")) {
+            if (proxy.trim().equals(remoteAddr)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

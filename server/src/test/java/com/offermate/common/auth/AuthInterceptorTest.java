@@ -25,7 +25,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** 拦截器是整条鉴权链路的闸门：这里钉住会话校验——存的 token 必须与请求携带的完全一致。 */
+/**
+ * 拦截器是整条鉴权链路的闸门：这里钉住两件事——
+ * ① 会话里存的 token 必须与请求携带的完全一致（换发令牌后旧 token 立刻作废）；
+ * ② 客户端 IP 默认只认 TCP 对端，X-Forwarded-For 不能由调用方自说自话。
+ */
 class AuthInterceptorTest {
 
     private static final String SECRET = "offermate-test-secret-key-0123456789abcdef";
@@ -36,12 +40,18 @@ class AuthInterceptorTest {
     @SuppressWarnings("unchecked")
     private final ValueOperations<String, String> valueOps = mock(ValueOperations.class);
 
-    private AuthInterceptor interceptor() {
+    private AuthInterceptor interceptor(String trustedProxies) {
         JwtUtil jwtUtil = new JwtUtil();
         ReflectionTestUtils.setField(jwtUtil, "secret", SECRET);
         ReflectionTestUtils.setField(jwtUtil, "expireHours", 24L);
+        AuthInterceptor target = new AuthInterceptor(jwtUtil, redis);
+        ReflectionTestUtils.setField(target, "trustedProxies", trustedProxies);
         when(redis.opsForValue()).thenReturn(valueOps);
-        return new AuthInterceptor(jwtUtil, redis);
+        return target;
+    }
+
+    private AuthInterceptor interceptor() {
+        return interceptor("");
     }
 
     private String issueToken() {
@@ -59,9 +69,14 @@ class AuthInterceptorTest {
     }
 
     private HttpServletRequest request(String token) {
+        return request(token, "10.0.0.7", null);
+    }
+
+    private HttpServletRequest request(String token, String remoteAddr, String forwardedFor) {
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getHeader("Authorization")).thenReturn("Bearer " + token);
-        when(request.getRemoteAddr()).thenReturn("10.0.0.7");
+        when(request.getRemoteAddr()).thenReturn(remoteAddr);
+        when(request.getHeader("X-Forwarded-For")).thenReturn(forwardedFor);
         return request;
     }
 
@@ -113,6 +128,44 @@ class AuthInterceptorTest {
         assertFalse(passed);
         assertNull(UserContext.userId());
         assertTrue(body.toString().contains("401"));
+    }
+
+    @Test
+    @DisplayName("未配置可信代理时忽略 X-Forwarded-For，取 TCP 对端地址")
+    void forwardedForIgnoredWithoutTrustedProxy() throws Exception {
+        String token = issueToken();
+        when(valueOps.get(SESSION_KEY)).thenReturn(token);
+        HttpServletRequest request = request(token, "10.0.0.7", "1.2.3.4");
+
+        assertTrue(interceptor().preHandle(request, response(new StringWriter()), new Object()));
+
+        assertEquals("10.0.0.7", UserContext.get().clientIp());
+    }
+
+    @Test
+    @DisplayName("直连对端不在可信代理列表里时，同样忽略伪造的 X-Forwarded-For")
+    void forwardedForIgnoredWhenPeerNotInAllowlist() throws Exception {
+        String token = issueToken();
+        when(valueOps.get(SESSION_KEY)).thenReturn(token);
+        HttpServletRequest request = request(token, "10.0.0.7", "1.2.3.4");
+
+        assertTrue(interceptor("172.16.0.1, 172.16.0.2")
+                .preHandle(request, response(new StringWriter()), new Object()));
+
+        assertEquals("10.0.0.7", UserContext.get().clientIp());
+    }
+
+    @Test
+    @DisplayName("直连对端是可信代理时，取 X-Forwarded-For 的第一段作为客户端 IP")
+    void forwardedForTrustedWhenPeerIsProxy() throws Exception {
+        String token = issueToken();
+        when(valueOps.get(SESSION_KEY)).thenReturn(token);
+        HttpServletRequest request = request(token, "172.16.0.2", "1.2.3.4, 172.16.0.2");
+
+        assertTrue(interceptor("172.16.0.1,172.16.0.2")
+                .preHandle(request, response(new StringWriter()), new Object()));
+
+        assertEquals("1.2.3.4", UserContext.get().clientIp());
     }
 
     @Test

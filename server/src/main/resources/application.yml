@@ -100,6 +100,10 @@ offermate:
     # 必须是 ≥32 字节的随机值，生成示例：openssl rand -base64 32
     secret: ${JWT_SECRET:}
     expire-hours: 24
+  auth:
+    # 可信代理地址（逗号分隔）：留空 = 不信任 X-Forwarded-For，客户端 IP 只取 TCP 对端。
+    # 只有请求的直连对端在这个列表里时，才采信 XFF 的第一段；例：TRUSTED_PROXIES=10.0.0.5,10.0.0.6
+    trusted-proxies: ${TRUSTED_PROXIES:}
   # 故障注入开关：把 parser-fail-rate 调成 0.3 就能复现"重试前后成功率对比"的数据
   mock:
     parser-fail-rate: ${MOCK_PARSER_FAIL_RATE:0.0}
