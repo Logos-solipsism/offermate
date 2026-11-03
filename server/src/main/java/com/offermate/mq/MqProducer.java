@@ -22,7 +22,10 @@ public class MqProducer {
 
     /**
      * 异步发送：不阻塞业务线程——投递主链路不等待任何外部调用（压测实测单请求 20ms）。
-     * 生产端可靠性兜底：发送失败会告警，并由本地消息表定时任务补偿重投（见 docs/01 第 11 节）。
+     *
+     * <p>可靠性现状（如实记录）：发送失败只记一条 error 日志，既没有重发、也没有本地消息表补偿
+     * （「本地消息表 + 定时补偿」在 docs/03 里仍是待补项），失败的消息只能人工重放。
+     * 所以调用方必须保证消息在业务事务提交之后再发（见 ApplicationService 的 afterCommit）。
      */
     public void sendAsync(String topic, String bizKey, Object payload) {
         Message<String> message = buildMessage(bizKey, payload);

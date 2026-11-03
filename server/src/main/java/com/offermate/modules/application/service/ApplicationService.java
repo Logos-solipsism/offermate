@@ -127,12 +127,31 @@ public class ApplicationService {
             applicationMapper.insert(application);
 
             // 6) 发 MQ，主链路到此结束（不等待解析、不等待打分、不等待短信）
-            mqProducer.sendAsync(MqTopics.JOB_MATCH, "application:" + application.getId(),
-                    new MqEvents.JobMatchEvent(application.getId(), userId, jobId,
-                            resume.getId(), resumeFile.getMd5()));
-            mqProducer.sendAsync(MqTopics.NOTIFY, "application:" + application.getId(),
-                    new MqEvents.NotifyEvent(userId, application.getId(), "APPLY",
-                            "投递成功", "你已成功投递「" + job.getTitle() + "」，HR 将在 3 个工作日内处理"));
+            // 关键：必须在业务事务提交之后再发。在事务里发的话，消费者可能比提交更快，
+            // 读不到刚插入的 application 就把消息当成功丢掉——匹配分永远停在 0，而且不会重投。
+            Runnable sendMq = () -> {
+                try {
+                    mqProducer.sendAsync(MqTopics.JOB_MATCH, "application:" + application.getId(),
+                            new MqEvents.JobMatchEvent(application.getId(), userId, jobId,
+                                    resume.getId(), resumeFile.getMd5()));
+                    mqProducer.sendAsync(MqTopics.NOTIFY, "application:" + application.getId(),
+                            new MqEvents.NotifyEvent(userId, application.getId(), "APPLY",
+                                    "投递成功", "你已成功投递「" + job.getTitle() + "」，HR 将在 3 个工作日内处理"));
+                } catch (RuntimeException e) {
+                    // 提交后发送失败：业务数据已经落库，只能靠人工重放（本地消息表仍是待补项）
+                    log.error("投递消息发送失败 applicationId={}", application.getId(), e);
+                }
+            };
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        sendMq.run();
+                    }
+                });
+            } else {
+                sendMq.run();
+            }
 
             return new ApplyResult(application.getId(), Application.STATUS_APPLIED, "投递成功");
         } catch (DuplicateKeyException e) {
