@@ -96,7 +96,9 @@ offermate:
     # 分片状态保留时长（断点续传窗口）
     part-state-ttl-hours: 24
   jwt:
-    secret: ${JWT_SECRET:offermate-dev-secret-key-please-change-in-production-32bytes}
+    # 无内置默认值：不配 JWT_SECRET 启动即失败（JwtUtil 启动期校验）
+    # 必须是 ≥32 字节的随机值，生成示例：openssl rand -base64 32
+    secret: ${JWT_SECRET:}
     expire-hours: 24
   # 故障注入开关：把 parser-fail-rate 调成 0.3 就能复现"重试前后成功率对比"的数据
   mock:
