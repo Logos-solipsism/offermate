@@ -194,7 +194,10 @@ export AI_MODEL=Qwen/Qwen2.5-7B-Instruct
 
 ### 4. 启动后端
 
+JWT 密钥没有内置默认值：不配置就直接启动失败（这是有意的，仓库里的默认密钥等于公开密钥）。先设一个 ≥32 字节的随机值，再启动：
+
 ```bash
+export JWT_SECRET=$(openssl rand -base64 32)     # Windows PowerShell: $env:JWT_SECRET=[Convert]::ToBase64String((1..32 | %{Get-Random -Max 256}))
 cd server && mvn spring-boot:run
 ```
 
@@ -214,7 +217,7 @@ cd web && npm install && npm run dev
 cd server && mvn test
 ```
 
-19 个用例，覆盖 JWT 签发与篡改/过期校验、指数退避的次数上限与封顶、限流阈值的配置表优先与兜底、解析故障注入能力、以及 HR 越权查询拦截；**不依赖 MySQL / Redis / RocketMQ**，所以 CI 里可以直接跑。
+30 个用例，覆盖 JWT 签发与篡改/过期校验、密钥启动期校验、登录拦截器的会话比对与客户端 IP 解析、指数退避的次数上限与封顶、限流阈值的配置表优先与兜底、解析故障注入能力、以及 HR 越权查询拦截；**不依赖 MySQL / Redis / RocketMQ**，所以 CI 里可以直接跑。
 
 ### 7. 或者：一条命令把中间件和后端都放进容器
 
@@ -222,7 +225,7 @@ cd server && mvn test
 docker compose --profile app --profile minio up -d --build
 ```
 
-后端配置全部走环境变量（`application.yml` 里每一项都有本地默认值），容器之间用服务名互联，所以同一个 jar 既能本机跑也能进容器跑。前端仍在宿主机上用 Vite 开发服务器启动。
+后端配置全部走环境变量（`application.yml` 里除 `JWT_SECRET` 外每一项都有本地默认值；密钥没有默认值——容器里也要把它传进去，否则启动即失败），容器之间用服务名互联，所以同一个 jar 既能本机跑也能进容器跑。前端仍在宿主机上用 Vite 开发服务器启动。
 
 打开 <http://localhost:5273>。
 
