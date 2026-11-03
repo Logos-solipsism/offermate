@@ -22,6 +22,12 @@ public final class MqTopics {
 
     public static final String DLQ_RESUME_PARSE = "%DLQ%" + CG_RESUME_PARSE;
 
+    /** JD 匹配打分耗尽重试后的死信主题 */
+    public static final String DLQ_JOB_MATCH = "%DLQ%" + CG_JOB_MATCH;
+
+    /** 通知推送耗尽重试后的死信主题 */
+    public static final String DLQ_NOTIFY = "%DLQ%" + CG_NOTIFY;
+
     private MqTopics() {
     }
 }
