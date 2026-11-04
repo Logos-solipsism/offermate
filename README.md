@@ -183,6 +183,26 @@ mysql -h127.0.0.1 -P13306 -uroot -proot123456 < server/src/main/resources/db/sch
 mysql -h127.0.0.1 -P13306 -uroot -proot123456 < server/src/main/resources/db/data.sql   # 可选：演示数据
 ```
 
+#### 数据库初始化配置与数据卷
+
+中文种子数据要落库正确，容器初始化时用的 **mysql 客户端字符集**必须显式设成 utf8mb4，这就是 `deploy/mysql-client.cnf` 的用途：
+
+- 官方镜像初始化时会用 `mysql` 客户端执行挂在 `/docker-entrypoint-initdb.d/` 下的 `01-schema.sql` / `02-data.sql`。客户端不配置时默认按 **latin1** 解释文件内容，SQL 里的 UTF-8 中文会被当成 latin1 再按 utf8mb4 存一遍——**双重编码**。现象很有迷惑性：接口新建的数据一切正常，只有种子数据是乱码，`job.city` 存成 `C3A5C592E28094C3A4C2BAC2AC`（`北京` 被二次编码）而不是 `E58C97E4BAAC`，于是 `GET /api/agent/jobs?city=北京` 返回 0 条。所以这份 cnf **必须存在**，删掉就会复现乱码。
+- **Windows 上的坑**：bind mount 进容器的文件权限一律是 `777`，MySQL 会打印 `World-writable config file ... is ignored` 并**完全忽略**这份配置（`:ro` 也拦不住，777 是文件本身的权限，不是可写性）。所以 compose 里没有把 cnf 直接挂进 `/etc/mysql/conf.d/`，而是挂到 `/opt/offermate/mysql-client.cnf`，由覆盖后的 `entrypoint` 在官方脚本读配置之前 `install -m 0644` 复制一份进去。验证时 `docker logs offermate-mysql | grep world-writable` 必须为空。
+- **改了这些配置后必须重建数据卷**：`/docker-entrypoint-initdb.d/` 里的脚本**只在数据卷为空时**执行一次，已有数据卷不会重新初始化，改完 compose 直接 `up -d` 不会有任何变化。要生效只能先删卷：
+
+  ```bash
+  docker compose down -v          # -v 删数据卷，会清空已有数据
+  docker compose up -d --wait mysql
+  ```
+
+  重建后自查（第二列应为 `E58C97E4BAAC`）：
+
+  ```bash
+  docker exec offermate-mysql mysql -uroot -proot123456 -N \
+    -e 'use offermate; select id, hex(city), city from job where id=9001;'
+  ```
+
 ### 3. 配置大模型（可选）
 
 不配置也能跑：AI 助手接口会降级返回提示语，其余功能不受影响。要真实体验就填一个 OpenAI 兼容服务的 Key（硅基流动 / DeepSeek / 通义 / 本地 Ollama 都可以）：
@@ -257,6 +277,7 @@ docker compose --profile app --profile minio up -d --build
     ├─ docker-compose.yml            # 一键起 MySQL / Redis / RocketMQ / MinIO（app profile 还能起后端）
     ├─ .github/workflows/ci.yml      # CI：JDK 17 下编译并运行单元测试
     ├─ deploy/broker.conf            # RocketMQ broker 配置（Docker 场景需指定 brokerIP1）
+    ├─ deploy/mysql-client.cnf       # MySQL 客户端字符集（不配则中文种子数据双重编码，见「初始化配置与数据卷」）
     ├─ docs/
     │  ├─ 01-项目方案-OfferMate.md    # 架构、领域模型、亮点实现、DDL、接口、设计决策记录
     │  └─ 03-代码地图与已实现清单.md   # 每个文件干什么、已实现 / 待补齐

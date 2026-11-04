@@ -11,12 +11,28 @@ services:
       MYSQL_DATABASE: offermate
       TZ: Asia/Shanghai
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # Windows 上 bind mount 进来的文件权限一律是 777，而 MySQL 会打印
+    # "World-writable config file ... is ignored" 并**完全忽略**它（:ro 也拦不住：
+    # 777 是文件本身的权限，不是可写性）。而 :ro 挂载又 chmod 不动（read-only file system），
+    # 所以拿不到"既能只读挂载、权限又是 0644"的文件 —— 只能挂到旁路路径，
+    # 在官方 entrypoint 读配置之前复制一份 0644 的进去。
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        install -m 0644 /opt/offermate/mysql-client.cnf /etc/mysql/conf.d/charset.cnf
+        exec docker-entrypoint.sh "$$@"
+      - --
     volumes:
       # 用 Docker 数据卷（不用挂载本机目录）：Windows 上挂载目录要穿过虚拟机，磁盘 IO 最慢
       - mysql-data:/var/lib/mysql
       # 逐个挂载并加数字前缀：容器按文件名字母序执行，直接挂目录会让 data.sql 跑在 schema.sql 前面
       - ./server/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./server/src/main/resources/db/data.sql:/docker-entrypoint-initdb.d/02-data.sql
+      # 客户端字符集：初始化脚本由容器内的 mysql 客户端执行，它默认按 latin1 读 SQL 文件，
+      # 中文种子数据会被二次编码成乱码（详见 README「初始化配置与数据卷」）。
+      # 挂到旁路路径（不是 /etc/mysql/conf.d），由上面的 entrypoint 复制成 0644 后再用。
+      - ./deploy/mysql-client.cnf:/opt/offermate/mysql-client.cnf:ro
 
   redis:
     image: redis:7.2
