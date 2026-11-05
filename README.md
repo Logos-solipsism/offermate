@@ -237,7 +237,7 @@ cd web && npm install && npm run dev
 cd server && mvn test
 ```
 
-30 个用例，覆盖 JWT 签发与篡改/过期校验、密钥启动期校验、登录拦截器的会话比对与客户端 IP 解析、指数退避的次数上限与封顶、限流阈值的配置表优先与兜底、解析故障注入能力、以及 HR 越权查询拦截；**不依赖 MySQL / Redis / RocketMQ**，所以 CI 里可以直接跑。
+45 个用例（分布在 10 个测试类），覆盖 JWT 签发与篡改/过期校验、密钥启动期校验、登录拦截器的会话比对与客户端 IP 解析、指数退避的次数上限与封顶、限流阈值的配置表优先与兜底、解析故障注入能力、以及 HR 越权查询拦截；**不依赖 MySQL / Redis / RocketMQ**，所以 CI 里可以直接跑。
 
 ### 7. 或者：一条命令把中间件和后端都放进容器
 
@@ -258,7 +258,7 @@ docker compose --profile app --profile minio up -d --build
 
 ## 实测数据
 
-所有数字都是在本机真实压测出来的，方法和复现步骤见 **[bench/压测说明.md](bench/压测说明.md)**；原始采集输出未随仓库发布，表内数字以该文档记录的轮次与参数为准。
+所有数字都是在本机真实压测出来的，方法和复现步骤见 **[bench/压测说明.md](bench/压测说明.md)**；逐条原始记录（两次复测、去重/秒传/续传/限流/traceId 各小节）见 **[bench/压测结果记录.md](bench/压测结果记录.md)**；仓库里没有另外的 log 文件，表内数字以这两份文档记录的口径为准。
 
 | 指标 | 改造前 | 改造后 |
 | --- | --- | --- |
@@ -270,6 +270,30 @@ docker compose --profile app --profile minio up -d --build
 | 投递接口突发 10 次请求 | 全部放行 | **只放行 5 次 + 5 次 429**（桶容量 5 / 每秒补 1）；按正常节奏（每 1.2 秒 1 次）连续请求全部通过 |
 | 同一份简历重复上传 10 次 | 10 次上传 + 10 次解析 | **9 次秒传命中 + 只解析 1 次**（首次上传必然走完整链路，秒传从第 2 次开始） |
 | 25MB 文件传 3/5 片后中断 | 需重传 5 片 | **只补传 2 片**，合并结果与源文件一致 |
+
+### 想自己复核：三条命令
+
+上表每个数字都对应仓库里的一个文件，不需要相信本文档：
+
+```bash
+# ① 中间件（docker-compose.yml 里 5 个服务默认常驻；minio 与 app 两个要显式加 profile）
+docker compose up -d                                  # mysql:13306 / redis:6379 / rocketmq:9876,10911 / dashboard:8180
+docker compose --profile minio up -d                  # 可选：minio，官方镜像已下架，只有演示上传功能时才需要
+docker compose --profile app --profile minio up -d --build   # 可选：连后端一起放进容器
+
+# ② 单元测试（不依赖 MySQL / Redis / RocketMQ，CI 里跑的就是它）
+cd server && mvn test
+
+# ③ 压测：对照组接口只在 bench profile 下注册（BenchService / BenchController 上有 @Profile("bench")）
+cd server && mvn spring-boot:run -Dspring-boot.run.profiles=bench
+cd ../bench && java -Dstdout.encoding=UTF-8 Bench.java --prepare 500
+java -Dstdout.encoding=UTF-8 Bench.java --path /api/bench/apply-sync  --concurrency 50 --requests 200
+java -Dstdout.encoding=UTF-8 Bench.java --path /api/bench/apply-async --concurrency 50 --requests 300
+```
+
+- **单元测试数量**是数出来的，不是估的：`(Get-ChildItem -Recurse -Filter *.java server\src\test | Select-String -Pattern '^\s*@Test\b' | Measure-Object).Count` → **45**（10 个测试类，无 `@Disabled`、无参数化用例）。
+- **压测的完整环境、参数与逐条结果**在 [bench/压测说明.md](bench/压测说明.md)（环境、参数、全部实测结果与复现步骤）；一步步的操作版见 [bench/从零开始跑压测.md](bench/从零开始跑压测.md)，逐条原始记录见 [bench/压测结果记录.md](bench/压测结果记录.md)；仓库里没有额外的 log 文件。
+- **两个 bench 接口刻意剥离了限流、幂等键与分布式锁**，目的是隔离「要不要等外部调用」这一个变量——所以 841ms → 21ms 是**受控对照实验**的结论，不等于线上投递接口的端到端耗时。
 
 ## 目录结构
 
